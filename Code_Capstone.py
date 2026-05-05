@@ -1,54 +1,57 @@
-Mdkir capstone
-
+## 1. File Preparation 
+Mkdir capstone
 cd capstone
 cd case_3
 conda activate 1.readq	
-fastqc case3_R1.fastq.gz
-fastqc case3_R1.fastq.gz
 
+## 2. Data Quality
+fastqc case3_R1.fastq.gz
+fastqc case3_R1.fastq.gz
+## a. Trimming Reads wih Trimmomatic
 trimmomatic PE \
 case3_R1.fastq.gz case3_R2.fastq.gz \
 case3_R1_paired.fastq.gz case3_R1_unpaired.fastq.gz \
 case3_R2_paired.fastq.gz case3_R2_unpaired.fastq.gz \
 ILLUMINACLIP:TruSeq3-SE.fa:2:30:10:2:True LEADING:30 TRAILING:30 MINLEN:36 HEADCROP:15 TAILCROP:5
-
+## b. QC after Trimming
 fastqc case3_R1_paired.fastq.gz case3_R1_unpaired.fastq.gz
 fastqc case3_R2_paired.fastq.gz case3_R2_unpaired.fastq.gz
 
+## 3. Read Alignment 
 bwa mem -t 1 \
 -R '@RG\tID:a1\tSM:nor\tPL:ILLUMINA\tLB:lib1\tPU:f_1' \
 ~/capstone/reference/Homo_sapiens_assembly38.fasta \
 ~/capstone/case_3/case3_R1_paired.fastq.gz \
 ~/capstone/case_3/case3_R2_paired.fastq.gz \
 > ~/capstone/outfile/sample_case3.sam
-
+## a. Converting sam to bam 
 samtools view -Shb \
 -o ~/capstone/outfile/sample_case3.bam \
 ~/capstone/outfile/sample_case3.sam
-
+## b. Sort BAM File 
 -o ~/capstone/outfile/sample3-sorted.bam \
 ~/capstone/outfile/germline.bam
-
+## c. Index BAM File
 samtools index \
 ~/capstone/outfile/sample_case3-sorted.bam
-
+## d. Mark Duplicate Reads 
 picard MarkDuplicates \
 INPUT=$HOME/capstone/outfile/sample_case3-sorted.bam \
 METRICS_FILE=$HOME/capstone/outfile/sample_case3-met.txt \
 OUTPUT=$HOME/capstone/outfile/sample_case3-dedup.bam \
 CREATE_INDEX=true
-
+## e. Base Quality Score Recalibration (BQSR)
 gatk BaseRecalibrator \
 -R $HOME/capstone/reference/Homo_sapiens_assembly38.fasta \
 -I $HOME/capstone/outfile/sample_case3-dedup.bam \
 --known-sites $HOME/capstone/reference/Homo_sapiens_assembly38.known_indels.vcf.gz \
 -O $HOME/capstone/outfile/sample_case3.grp
-
+## f. Apply BQSR 
 gatk ApplyBQSR -R ~/capstone/reference/Homo_sapiens_assembly38.fasta \
 -I  ~/capstone/outfile/sample_case3-dedup.bam \
 -bqsr ~/capstone/outfile/sample_case3.grp \
 -O ~/capstone/outfile/sample_case3-bqsr.bam
-
+## g. Post Alignment QC 
 gatk CollectAlignmentSummaryMetrics \
 > -R ~/capstone/reference/Homo_sapiens_assembly38.fasta \
 >--INPUT ~/capstone/outfile/sample_case3-bqsr.bam \
@@ -59,10 +62,13 @@ gatk CollectInsertSizeMetrics \
 --OUTPUT ~/capstone/outfile/sample_case3-bqsr_Size_Metrics.txt \
 --Histogram_FILE ~/capstone/outfile/sample_case3-bqsr_Size_Histo.pdf
 
+## 4. Variant Calling and Annotating
+## a. Activte conda
 cd capstone
 cd reference
 conda activate 3.varcall
 
+## b. Germline Varint Calling 
 gatk HaplotypeCaller \
 -L chr13 \
 -L chr17 \
@@ -70,6 +76,7 @@ gatk HaplotypeCaller \
 -I ~/capstone/outfile/sample_case3-sorted.bam \
 -O ~/capstone/outfile/sample_case3.vcf
 
+## c. Germline Varint Calling 
 gatk VariantFiltration \
 -R ~/capstone/reference/Homo_sapiens_assembly38.fasta \
 -V ~/capstone/outfile/sample_case3.vcf \
@@ -78,24 +85,26 @@ gatk VariantFiltration \
 --filter-name "FS60" --filter-expression "FS > 60.0" \
 --filter-name "MQ40" --filter-expression "MQ < 40.0"
 
+## d. Extract the Passed Variant
 bcftools view \
 -f PASS \
 -O z \
 -o ~/capstone/outfile/sample_case3_pass.vcf.gz \
 ~/capstone/outfile/sample_case3_filtered.vcf
 
+## e.  Create Zip dan Tbi file 
 bgzip ~/capstone/outfile/sample3_filtered.vcf
 tabix -p vcf ~/capstone/outfile/sample_case3_filtered.vcf.gz
-
+## f. Annotating Germline Variant 
 bcftools annotate \
 -a ~/capstone/reference/clinvar_chr.vcf.gz \
 -c ID,INFO \
 -h <(bcftools view -h ~/capstone/reference/clinvar_chr.vcf.gz | grep "^##INFO=") \
 ~/capstone/outfile/sample3_filtered.vcf.gz \
 -Oz -o ~/capstone/outfile/sample_case3_filtered_annotated.vcf.gz
-
+## g.  Extract to tsv. File
 bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%INFO/ALLELEID\t%INFO/RS\t%INFO/CLNHGVS\t%INFO/GENEINFO\t%INFO/MC\t%INFO/CLNSIG\t%INFO/CLNDN\t%INFO/ONC\t%INFO/SCI\t%INFO/SCIDN\n' sample_case3_filtered_annotated.vcf.gz > sample_case3_filtered_annotated_extracted.tsv
-
+## h. Filtering on the the Pathogenic Variant 
 bcftools view \
 -i 'INFO/CLNSIG = "Pathogenic" || INFO/CLNSIG = "Likely_pathogenic"' \
 ~/capstone/outfile/sample_case3_filtered_annotated.vcf.gz \
